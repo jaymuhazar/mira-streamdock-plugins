@@ -1,4 +1,4 @@
-# StreamDock plugins
+# Mira StreamDock Plugins
 
 Custom plugins for the **MiraBox StreamDock** (built and tested on the 293S V3 on Windows 11):
 
