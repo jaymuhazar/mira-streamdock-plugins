@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Wallpaper Clock settings</title>
+<style>
+  body { background: #2d2d2d; color: #ddd; font: 12px "Segoe UI", Arial, sans-serif; margin: 0; padding: 10px 12px; }
+  .row { display: flex; align-items: center; margin: 8px 0; }
+  .row label { width: 95px; flex: none; color: #aaa; }
+  .row > *:not(label) { flex: 1; }
+  select, input[type=text] { background: #3d3d3d; color: #eee; border: 1px solid #7a7a7a; height: 24px; }
+  input[type=color] { height: 26px; padding: 0; border: none; background: none; max-width: 60px; }
+  button { background: #3d3d3d; color: #eee; border: 1px solid #7a7a7a; padding: 4px 8px; cursor: pointer; margin-right: 6px; }
+  #preview { width: 100%; aspect-ratio: 854/480; background: #111 center/cover no-repeat; border: 1px solid #555; margin-top: 4px; }
+  .hint { color: #888; font-size: 11px; margin-top: 10px; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <div class="row"><label>Style</label>
+    <select id="style">
+      <option value="plain">Plain</option>
+      <option value="flip">Flip cards (animated)</option>
+    </select></div>
+  <div class="row"><label>Background</label>
+    <select id="bg">
+      <option value="image">Picture</option>
+      <option value="aurora">Aurora (animated)</option>
+      <option value="waves">Waves (animated)</option>
+      <option value="stars">Starfield (animated)</option>
+      <option value="hue">Colour shift (animated)</option>
+      <option value="video">Video clip (animated)</option>
+    </select></div>
+  <div class="row" id="zoomRow"><label>Zoom</label><input type="range" id="zoom" min="100" max="300" step="10"></div>
+  <div class="row" id="videoRow"><label>Video file</label><input type="text" id="videoFile" placeholder="background.mp4"></div>
+  <div class="row" id="fpsRow"><label>Smoothness</label>
+    <select id="animFps">
+      <option value="2">Low (2 fps)</option>
+      <option value="4">Medium (4 fps)</option>
+      <option value="8">High (8 fps)</option>
+    </select></div>
+  <div class="row" id="wallRow"><label>Wallpaper</label>
+    <div><input type="file" id="file" accept="image/*" style="display:none">
+      <button id="pick">Choose image…</button><button id="reset">Default</button></div>
+  </div>
+  <div id="preview"></div>
+  <div class="row"><label>Layout</label>
+    <select id="layout">
+      <option value="digits">One digit per key</option>
+      <option value="spread">Spread across keys</option>
+    </select></div>
+  <div class="row"><label>Font</label>
+    <select id="font">
+      <option value="segoe">Segoe UI (clean)</option>
+      <option value="segoeLight">Segoe UI Light (thin)</option>
+      <option value="bahnschrift">Bahnschrift (condensed)</option>
+      <option value="dseg7">7-segment (digital clock)</option>
+      <option value="impact">Impact (heavy)</option>
+      <option value="consolas">Consolas (monospace)</option>
+      <option value="georgia">Georgia (serif)</option>
+    </select></div>
+  <div class="row"><label>Sidebar logo</label>
+    <div><input type="file" id="logoFile" accept="image/*" style="display:none">
+      <button id="pickLogo">Choose logo…</button><button id="clearLogo">Remove</button></div>
+  </div>
+  <div class="row" id="logoOpts"><label>Logo position</label>
+    <select id="logoSlot"><option value="middle">Middle side screen</option><option value="bottom">Bottom side screen</option></select></div>
+  <div class="row" id="logoSizeRow"><label>Logo size</label><input type="range" id="logoScale" min="50" max="100" step="5"></div>
+  <div class="row"><label>Text colour</label><input type="color" id="textColor" value="#ffffff"></div>
+  <div class="row"><label>Darken image</label><input type="range" id="dim" min="0" max="70" step="5"></div>
+  <div class="row"><label>Clock</label>
+    <select id="hour12"><option value="false">24-hour (19:56)</option><option value="true">12-hour (7:56 PM)</option></select></div>
+  <div class="row"><label>Seconds</label>
+    <select id="showSeconds"><option value="false">Hide</option><option value="true">Show (on the sidebar)</option></select></div>
+  <div class="row"><label>Key shading</label><input type="range" id="backing" min="0" max="70" step="5"></div>
+  <div class="row"><label>Colon</label>
+    <select id="blinkColon"><option value="false">Steady</option><option value="true">Blink every second</option></select></div>
+  <div class="row"><label>Date style</label>
+    <select id="dateStyle">
+      <option value="long">Sunday, 1 November 2026 (spread layout)</option>
+      <option value="short">Sun, 1 Nov</option>
+      <option value="numeric">01/11/2026</option>
+    </select></div>
+  <div class="hint">Put this action on every key of the page. Each key shows its piece of the picture. Changing settings on one key updates them all. Animated backgrounds redraw every key several times a second; use Low smoothness if the device feels sluggish. Video clips go in the plugin's videos folder (MP4 or WebM); type the file name above. Leave one key for "Next page" if you like; it will show its own icon.</div>
+
+<script src="wallpaper.js"></script>
+<script>
+let ws, uuid, settings = {};
+const $ = (id) => document.getElementById(id);
+
+function save() {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ event: 'setSettings', context: uuid, payload: settings }));
+}
+
+function fill() {
+  $('textColor').value = settings.textColor || '#ffffff';
+  $('dim').value = settings.dim ?? 25;
+  $('hour12').value = String(!!settings.hour12);
+  $('showSeconds').value = String(!!settings.showSeconds);
+  $('dateStyle').value = settings.dateStyle || 'long';
+  $('layout').value = settings.layout || 'digits';
+  $('font').value = settings.font || 'segoe';
+  $('logoSlot').value = settings.logoSlot || 'middle';
+  $('logoScale').value = settings.logoScale || 100;
+  $('logoOpts').style.display = settings.logo ? '' : 'none';
+  $('logoSizeRow').style.display = settings.logo ? '' : 'none';
+  $('style').value = settings.style || 'plain';
+  $('bg').value = settings.bg || 'image';
+  $('animFps').value = String(settings.animFps || 4);
+  const anim = (settings.bg || 'image') !== 'image';
+  $('fpsRow').style.display = anim ? '' : 'none';
+  $('wallRow').style.display = anim ? 'none' : '';
+  $('preview').style.display = anim ? 'none' : '';
+  $('videoRow').style.display = settings.bg === 'video' ? '' : 'none';
+  $('videoFile').value = settings.videoFile || 'background.mp4';
+  $('zoom').value = settings.zoom || 100;
+  $('zoomRow').style.display = (settings.bg || 'image') === 'image' || settings.bg === 'video' ? '' : 'none';
+  $('backing').value = settings.backing ?? 35;
+  $('blinkColon').value = String(!!settings.blinkColon);
+  $('preview').style.backgroundImage = `url("${(settings.wallpaper && settings.wallpaper !== 'default' ? settings.wallpaper : window.DEFAULT_WALLPAPER)}")`;
+}
+
+$('textColor').oninput = (e) => { settings.textColor = e.target.value; save(); };
+$('dim').oninput = (e) => { settings.dim = Number(e.target.value); save(); };
+$('hour12').onchange = (e) => { settings.hour12 = e.target.value === 'true'; save(); };
+$('showSeconds').onchange = (e) => { settings.showSeconds = e.target.value === 'true'; save(); };
+$('dateStyle').onchange = (e) => { settings.dateStyle = e.target.value; save(); };
+$('pickLogo').onclick = () => $('logoFile').click();
+$('clearLogo').onclick = () => { settings.logo = ''; fill(); save(); };
+$('logoSlot').onchange = (e) => { settings.logoSlot = e.target.value; save(); };
+$('logoScale').oninput = (e) => { settings.logoScale = Number(e.target.value); save(); };
+// keep transparency; shrink so it fits comfortably in settings
+$('logoFile').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 256, k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      settings.logo = c.toDataURL('image/png');
+      fill(); save();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+  e.target.value = '';
+};
+$('style').onchange = (e) => { settings.style = e.target.value; save(); };
+$('bg').onchange = (e) => { settings.bg = e.target.value; fill(); save(); };
+$('zoom').oninput = (e) => { settings.zoom = Number(e.target.value); save(); };
+$('videoFile').onchange = (e) => { settings.videoFile = e.target.value.trim() || 'background.mp4'; save(); };
+$('animFps').onchange = (e) => { settings.animFps = Number(e.target.value); save(); };
+$('font').onchange = (e) => { settings.font = e.target.value; save(); };
+$('layout').onchange = (e) => { settings.layout = e.target.value; save(); };
+$('backing').oninput = (e) => { settings.backing = Number(e.target.value); save(); };
+$('blinkColon').onchange = (e) => { settings.blinkColon = e.target.value === 'true'; save(); };
+$('pick').onclick = () => $('file').click();
+$('reset').onclick = () => { settings.wallpaper = 'default'; fill(); save(); };
+
+// Shrink the chosen image to the panel size so it fits in the action's settings.
+$('file').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const W = 854, H = 480, c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const s = Math.max(W / img.width, H / img.height);
+      c.getContext('2d').drawImage(img, (W - img.width * s) / 2, (H - img.height * s) / 2, img.width * s, img.height * s);
+      settings.wallpaper = c.toDataURL('image/jpeg', 0.85);
+      fill(); save();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+};
+
+function connect(port, inUuid, registerEvent, info, actionInfo) {
+  uuid = inUuid;
+  try { const a = typeof actionInfo === 'string' ? JSON.parse(actionInfo) : actionInfo; settings = (a && a.payload && a.payload.settings) || {}; } catch (e) {}
+  fill();
+  ws = new WebSocket('ws://127.0.0.1:' + port);
+  ws.onopen = () => ws.send(JSON.stringify({ event: registerEvent, uuid }));
+  ws.onmessage = (evt) => {
+    const m = JSON.parse(evt.data);
+    if (m.event === 'didReceiveSettings') { settings = m.payload.settings || {}; fill(); }
+  };
+}
+window.connectElgatoStreamDeckSocket = connect;
+window.connectSDSocket = connect;
+window.connectSocket = connect;
+</script>
+</body>
+</html>

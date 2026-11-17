@@ -1,0 +1,19 @@
+# Personal settings (copy config.example.json -> config.json)
+config.json
+
+# Runtime logs and Python caches
+log.txt
+*.log
+__pycache__/
+*.pyc
+
+# Personal / third-party artwork you add locally
+plugins/*/images/glyph-*.png
+plugins/*/images/*-source.*
+plugins/com.jay.govee.sdPlugin/images/bulb-mask.png
+plugins/com.jay.govee.sdPlugin/images/rays-mask.png
+plugins/com.jay.wallclock.sdPlugin/videos/*
+!plugins/com.jay.wallclock.sdPlugin/videos/README.txt
+
+# Notes for AI assistants with machine-specific paths
+CLAUDE.md

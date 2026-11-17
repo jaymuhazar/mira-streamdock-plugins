@@ -1,0 +1,49 @@
+{
+  "Actions": [
+    {
+      "UUID": "com.jay.wallclock.action",
+      "Icon": "images/icon",
+      "state": 0,
+      "States": [
+        {
+          "FontSize": "10",
+          "TitleAlignment": "bottom",
+          "Image": "images/key.png"
+        }
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Controllers": [
+        "Keypad",
+        "Information"
+      ],
+      "Name": "Wallpaper Clock",
+      "Tooltip": "Put on every key and sidebar slot: big clock digits, date and year across your StreamDock",
+      "PropertyInspectorPath": "pi.html"
+    }
+  ],
+  "Version": "1.6.0",
+  "Name": "Wallpaper Clock",
+  "Icon": "images/category",
+  "CategoryIcon": "images/category",
+  "Category": "Wallpaper Clock",
+  "Description": "Full-panel wallpaper with a live clock and date",
+  "CodePath": "plugin.html",
+  "SDKVersion": 1,
+  "Author": "Jay",
+  "URL": "",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "7"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.11"
+    }
+  ],
+  "UUID": "com.jay.wallclock",
+  "Software": {
+    "MinimumVersion": "2.9"
+  }
+}

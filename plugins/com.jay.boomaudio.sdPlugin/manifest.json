@@ -1,0 +1,47 @@
+{
+  "Actions": [
+    {
+      "UUID": "com.jay.boomaudio.cycle",
+      "Icon": "images/icon",
+      "state": 0,
+      "States": [
+        {
+          "FontSize": "10",
+          "TitleAlignment": "bottom",
+          "Image": "images/key.png"
+        }
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Controllers": [
+        "Keypad"
+      ],
+      "Name": "Boom Output Device",
+      "Tooltip": "Press to switch Boom 3D to the next output device. The key shows the device Boom is using."
+    }
+  ],
+  "Version": "1.0.4",
+  "Nodejs": {
+    "Version": "20"
+  },
+  "Name": "Boom Audio",
+  "Icon": "images/category",
+  "CategoryIcon": "images/category",
+  "Category": "Boom Audio",
+  "Description": "Cycle Boom 3D's output device and show the current one on the key",
+  "CodePath": "plugin/index.js",
+  "CodePathWin": "plugin/index.js",
+  "SDKVersion": 1,
+  "Author": "Jay",
+  "URL": "",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "UUID": "com.jay.boomaudio",
+  "Software": {
+    "MinimumVersion": "2.9"
+  }
+}

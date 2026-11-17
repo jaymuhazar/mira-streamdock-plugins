@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Wallpaper Clock</title></head>
+<body>
+<canvas id="c"></canvas>
+<script src="wallpaper.js"></script>
+<script src="fonts.js"></script>
+<script>
+// =====================================================================
+//  Wallpaper Clock for MiraBox StreamDock 293S V3
+//  15 keys (5x3) + 3 sidebar screens. One big picture is drawn, each
+//  key shows its slice; text cells are drawn per key (plain or flip card).
+// =====================================================================
+
+const TILE = 144, GAP = 26;
+const COLS = 5, ROWS = 3;
+const SIDE_VISIBLE = 0.55;            // side screens show only the middle ~55% of a square image
+const TICK_MS = 50;                   // master loop
+const FLIP_MS = 420;                  // flip animation length
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const tileCanvas = document.createElement('canvas'); tileCanvas.width = tileCanvas.height = TILE;
+const tctx = tileCanvas.getContext('2d');
+const work = document.createElement('canvas'); work.width = work.height = TILE;   // scratch for flaps
+const wctx = work.getContext('2d');
+
+const GRID_W = COLS * TILE + (COLS - 1) * GAP;
+const SIDE_CX = GRID_W + GAP + (TILE * SIDE_VISIBLE) / 2;
+canvas.width = Math.ceil(SIDE_CX + TILE / 2);
+canvas.height = ROWS * TILE + (ROWS - 1) * GAP;
+const W = canvas.width, H = canvas.height;
+
+let ws = null;
+let shared = {};
+const instances = {};   // context -> { device, col, row, side, cur, anim, dirty, last }
+let lastBgAt = 0, bgDirty = true, lastSpreadKey = '';
+
+// ---------------------------------------------------------------- images
+const defaultWallpaper = new Image();
+defaultWallpaper.onload = () => { bgDirty = true; };
+defaultWallpaper.src = window.DEFAULT_WALLPAPER;
+const images = {};
+function getImage(src) {
+  if (!src || src === 'default') return defaultWallpaper;
+  if (!images[src]) { const im = new Image(); im.onload = () => { bgDirty = true; }; im.src = src; images[src] = im; }
+  return images[src].complete && images[src].naturalWidth ? images[src] : defaultWallpaper;
+}
+
+const logos = {};
+function getLogo(src) {
+  if (!src) return null;
+  if (!logos[src]) { const im = new Image(); im.onload = () => forceAll(); im.src = src; logos[src] = im; }
+  return logos[src].complete && logos[src].naturalWidth ? logos[src] : null;
+}
+function logoSlot(settings) { return settings.logoSlot === 'bottom' ? 2 : 1; }
+
+// ---------------------------------------------------------------- fonts
+const FONTS = {
+  segoe:       { fam: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', w: null },
+  segoeLight:  { fam: '"Segoe UI Light", "Segoe UI", Arial, sans-serif', w: 300 },
+  bahnschrift: { fam: 'Bahnschrift, "Segoe UI", Arial, sans-serif', w: null },
+  impact:      { fam: 'Impact, "Arial Black", sans-serif', w: 400 },
+  consolas:    { fam: 'Consolas, "Courier New", monospace', w: null },
+  georgia:     { fam: 'Georgia, "Times New Roman", serif', w: null },
+  dseg7:       { fam: '"DSEG7", Bahnschrift, monospace', w: 700, digitsOnly: true }
+};
+try {
+  const ff = new FontFace('DSEG7', `url(${window.DSEG7_WOFF2})`, { weight: '700' });
+  document.fonts.add(ff);
+  ff.load().then(() => { forceAll(); }).catch(() => {});
+} catch (e) {}
+
+const SIZES   = { big: 128, colon: 160, mid: 92, word: 48, dayword: 48, side: 30, sidesecs: 64 };
+const WEIGHTS = { big: 700, colon: 700, mid: 600, word: 700, dayword: 700, side: 700, sidesecs: 600 };
+
+function fontFor(cell, settings) {
+  const choice = FONTS[settings.font] || FONTS.segoe;
+  const useF = (choice.digitsOnly && /[A-Za-z]/.test(cell.t)) ? FONTS.bahnschrift : choice;
+  return { f: useF, seg: useF === FONTS.dseg7, wt: useF.w || WEIGHTS[cell.k] || 700 };
+}
+// largest font size (<= the kind's base size) at which text fits maxW
+function fitSize(c2d, text, kind, settings, maxW, scale) {
+  const { f, seg, wt } = fontFor({ t: text, k: kind }, settings);
+  let size = Math.round((SIZES[kind] || 80) * (seg ? 0.82 : 1) * (scale || 1));
+  const mk = (sz) => `${wt} ${sz}px ${f.fam}`;
+  c2d.font = mk(size);
+  while (c2d.measureText(text).width > maxW && size > 14) { size -= 2; c2d.font = mk(size); }
+  return { size, font: mk(size), seg };
+}
+
+// ---------------------------------------------------------------- backgrounds
+const BG = {
+  aurora(t) {
+    ctx.fillStyle = '#05060f'; ctx.fillRect(0, 0, W, H);
+    const blobs = [['#6a2cff', 0.0], ['#00c2c7', 1.7], ['#ff4fa3', 3.1], ['#2d6bff', 4.4]];
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    blobs.forEach(([col, ph], i) => {
+      const x = W * (0.5 + 0.42 * Math.sin(t * (0.09 + i * 0.013) + ph));
+      const y = H * (0.5 + 0.40 * Math.cos(t * (0.07 + i * 0.011) + ph * 1.3));
+      const r = H * (0.75 + 0.15 * Math.sin(t * 0.2 + i));
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, col + 'b0'); g.addColorStop(1, col + '00');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    });
+    ctx.restore();
+  },
+  waves(t) {
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#02040c'); g.addColorStop(1, '#071430');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineWidth = 1.4;
+    for (let i = 0; i < 26; i++) {
+      const k = i / 26;
+      ctx.strokeStyle = `rgba(${80 + 60 * k | 0},${130 + 60 * k | 0},255,${0.10 + 0.25 * (1 - Math.abs(k - 0.5) * 2)})`;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 12) {
+        const y = H * 0.62 + Math.sin(x * 0.006 + t * 0.6 + k * 2.2) * (40 + 60 * k) + Math.sin(x * 0.013 - t * 0.35 + k * 5) * 18 - k * 60;
+        x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+  stars(t) {
+    ctx.fillStyle = '#03040a'; ctx.fillRect(0, 0, W, H);
+    for (const s of STARS) {
+      const x = ((s.x - t * s.z * 14) % W + W) % W;
+      const a = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * s.tw + s.ph));
+      ctx.fillStyle = `rgba(220,230,255,${a * s.z})`;
+      ctx.beginPath(); ctx.arc(x, s.y, 0.6 + s.z * 1.8, 0, 6.283); ctx.fill();
+    }
+  },
+  hue(t) {
+    const h = (t * 8) % 360;
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, `hsl(${h},65%,22%)`); g.addColorStop(0.5, `hsl(${(h + 50) % 360},65%,16%)`); g.addColorStop(1, `hsl(${(h + 110) % 360},70%,24%)`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+};
+const STARS = Array.from({ length: 170 }, () => ({ x: Math.random() * 2000, y: Math.random() * 480, z: 0.25 + Math.random() * 0.75, tw: 0.5 + Math.random() * 2, ph: Math.random() * 6 }));
+
+// ---------------------------------------------------------------- video background
+// Clip lives in the plugin's videos/ folder. Tries the named file, then a .webm copy as fallback.
+let video = null, videoName = '', videoTried = [], lastVT = -1, lastVTAt = 0, seekMode = false;
+function videoSources(name) {
+  const base = name.replace(/\.[^.]+$/, '');
+  return [name, base + '.webm', base + '.mp4'].filter((v, i, a) => a.indexOf(v) === i);
+}
+function ensureVideo(name) {
+  name = name || 'background.mp4';
+  if (video && videoName === name) return video;
+  if (video) { try { video.pause(); } catch (e) {} video.remove(); }
+  videoName = name; videoTried = []; seekMode = false; lastVT = -1;
+  video = document.createElement('video');
+  video.muted = true; video.loop = true; video.playsInline = true; video.autoplay = true; video.preload = 'auto';
+  video.style.cssText = 'position:absolute;left:-9999px;width:16px;height:9px';
+  const tryNext = () => {
+    const list = videoSources(name).filter(s => !videoTried.includes(s));
+    if (!list.length) { log('video: no playable source for ' + name); return; }
+    videoTried.push(list[0]); video.src = 'videos/' + list[0]; video.load();
+    video.play().catch(() => {});
+  };
+  video.onerror = tryNext;
+  video.onloadeddata = () => { bgDirty = true; video.play().catch(() => {}); };
+  document.body.appendChild(video);
+  tryNext();
+  return video;
+}
+function zoomOf(st) { return Math.max(1, Math.min(4, Number(st.zoom || 100) / 100)); }
+function drawVideo(nowMs) {
+  const v = ensureVideo(shared.videoFile);
+  if (!v || v.readyState < 2) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return; }
+  // if playback stalls (hidden window throttling), step through the clip by seeking instead
+  if (v.currentTime !== lastVT) { lastVT = v.currentTime; lastVTAt = nowMs; }
+  else if (!seekMode && nowMs - lastVTAt > 1500) seekMode = true;
+  if (seekMode && v.duration && !v.seeking) v.currentTime = (nowMs / 1000) % v.duration;
+  const iw = v.videoWidth || W, ih = v.videoHeight || H;
+  const s = Math.max(W / iw, H / ih) * zoomOf(shared);
+  ctx.drawImage(v, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
+}
+
+function drawBackground(nowMs) {
+  const mode = shared.bg || 'image';
+  ctx.clearRect(0, 0, W, H);
+  if (mode !== 'video' && video) { try { video.pause(); } catch (e) {} video.remove(); video = null; videoName = ''; }
+  if (mode === 'video') drawVideo(nowMs);
+  else if (BG[mode]) BG[mode](nowMs / 1000);
+  else {
+    const img = getImage(shared.wallpaper);
+    const iw = img.naturalWidth || W, ih = img.naturalHeight || H;
+    const s = Math.max(W / iw, H / ih) * zoomOf(shared);
+    ctx.drawImage(img, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
+  }
+  const dim = Math.max(0, Math.min(80, Number(shared.dim ?? 25))) / 100;
+  if (dim > 0) { ctx.fillStyle = `rgba(0,0,0,${dim})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ---------------------------------------------------------------- content
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function buildCells(settings) {
+  const now = new Date();
+  let h = now.getHours(), ampm = '';
+  if (settings.hour12) { ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; }
+  const hh = settings.hour12 ? String(h).padStart(2, ' ') : pad(h);
+  const mm = pad(now.getMinutes()), ss = pad(now.getSeconds());
+  const locale = settings.locale || 'en-GB';
+  const full = now.toLocaleDateString(locale, { weekday: 'long' }).toUpperCase();
+  const prefix = full.endsWith('DAY') && full.length > 3 ? full.slice(0, -3) : full;
+  const mon = now.toLocaleDateString(locale, { month: 'short' }).toUpperCase().slice(0, 3);
+  const dd = pad(now.getDate()), yyyy = String(now.getFullYear());
+  const blink = settings.blinkColon && now.getSeconds() % 2 === 1;
+  const c = {};
+  // row 0: time
+  c['0,0'] = { t: hh[0] === ' ' ? '' : hh[0], k: 'big' };
+  c['1,0'] = { t: hh[1], k: 'big' };
+  c['2,0'] = { t: blink ? ' ' : ':', k: 'colon', noFlip: true };
+  c['3,0'] = { t: mm[0], k: 'big' };
+  c['4,0'] = { t: mm[1], k: 'big' };
+  // row 1: WEDNES | DAY | d | d | MON
+  c['0,1'] = { t: prefix, k: 'word' };
+  c['1,1'] = { t: full.endsWith('DAY') ? 'DAY' : '', k: 'dayword', match: prefix };
+  c['2,1'] = { t: dd[0], k: 'mid' };
+  c['3,1'] = { t: dd[1], k: 'mid' };
+  c['4,1'] = { t: mon, k: 'word' };
+  // row 2: year
+  for (let i = 0; i < 4; i++) c[i + ',2'] = { t: yyyy[i], k: 'mid' };
+  // sidebar: seconds on top, AM/PM at the bottom
+  if (settings.showSeconds) c['5,0'] = { t: ss, k: 'sidesecs' };
+  if (settings.hour12) c['5,' + (settings.logo && logoSlot(settings) === 2 ? 1 : 2)] = { t: ampm, k: 'side' };
+  return c;
+}
+
+// ---------------------------------------------------------------- drawing a cell
+function cellBox(side) {
+  if (side) { const w = Math.round(TILE * SIDE_VISIBLE * 0.94); return { x: (TILE - w) / 2, y: 8, w, h: TILE - 16 }; }
+  return { x: 7, y: 7, w: TILE - 14, h: TILE - 14 };
+}
+
+function textMetrics(c2d, cell, settings, maxW, scale) {
+  let m = fitSize(c2d, cell.t, cell.k, settings, maxW, scale);
+  if (cell.k === 'dayword' && cell.match) {           // DAY matches the day-name key
+    const m2 = fitSize(c2d, cell.match, 'word', settings, maxW, scale);
+    m = fitSize(c2d, cell.t, cell.k, settings, 9999, m2.size / SIZES.dayword);
+  }
+  return m;
+}
+
+function drawText(c2d, cell, settings, box, flipStyle) {
+  if (!cell || !cell.t || !cell.t.trim()) return;
+  const color = settings.textColor || '#FFFFFF';
+  const scale = flipStyle ? 0.86 : 1;
+  const maxW = box.w * 0.88;
+  const m = textMetrics(c2d, cell, settings, maxW, scale);
+  c2d.font = m.font; c2d.textAlign = 'center'; c2d.textBaseline = 'middle';
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2 + (m.seg ? 0 : (cell.k === 'colon' ? -10 * scale : m.size * 0.04));
+  if (m.seg && cell.t !== ':') {
+    c2d.save(); c2d.globalAlpha = 0.13; c2d.fillStyle = color; c2d.fillText(cell.t.replace(/[0-9]/g, '8'), cx, cy); c2d.restore();
+  }
+  c2d.save();
+  if (!flipStyle) { c2d.shadowColor = 'rgba(0,0,0,0.75)'; c2d.shadowBlur = 14; }
+  c2d.fillStyle = color; c2d.fillText(cell.t, cx, cy);
+  c2d.restore();
+}
+
+function roundRect(c2d, x, y, w, h, r) {
+  c2d.beginPath(); c2d.moveTo(x + r, y); c2d.arcTo(x + w, y, x + w, y + h, r); c2d.arcTo(x + w, y + h, x, y + h, r);
+  c2d.arcTo(x, y + h, x, y, r); c2d.arcTo(x, y, x + w, y, r); c2d.closePath();
+}
+
+// flip-card face (card + text + hinge line) on a transparent TILE-sized canvas
+const faceCache = new Map();
+function cardFace(cell, side, settings) {
+  const key = (side ? 'S' : 'K') + '|' + cell.k + '|' + cell.t + '|' + (cell.match || '') + '|' + (settings.font || '') + '|' + (settings.textColor || '');
+  if (faceCache.has(key)) return faceCache.get(key);
+  const fc = document.createElement('canvas'); fc.width = fc.height = TILE;
+  const f = fc.getContext('2d');
+  const b = cellBox(side), r = side ? 8 : 12, mid = b.y + b.h / 2;
+  const g = f.createLinearGradient(0, b.y, 0, b.y + b.h);
+  g.addColorStop(0, 'rgba(40,40,44,0.94)'); g.addColorStop(0.5, 'rgba(26,26,29,0.94)'); g.addColorStop(0.5001, 'rgba(20,20,23,0.94)'); g.addColorStop(1, 'rgba(12,12,14,0.94)');
+  roundRect(f, b.x, b.y, b.w, b.h, r); f.fillStyle = g; f.fill();
+  drawText(f, cell, settings, b, true);
+  // hinge
+  f.fillStyle = 'rgba(0,0,0,0.85)'; f.fillRect(b.x, mid - 1.5, b.w, 3);
+  f.fillStyle = 'rgba(255,255,255,0.06)'; f.fillRect(b.x, mid + 1.5, b.w, 1);
+  if (faceCache.size > 300) faceCache.clear();
+  faceCache.set(key, fc);
+  return fc;
+}
+
+function shaded(face, alpha) {
+  wctx.clearRect(0, 0, TILE, TILE); wctx.globalCompositeOperation = 'source-over';
+  wctx.drawImage(face, 0, 0);
+  if (alpha > 0) { wctx.globalCompositeOperation = 'source-atop'; wctx.fillStyle = `rgba(0,0,0,${alpha})`; wctx.fillRect(0, 0, TILE, TILE); }
+  wctx.globalCompositeOperation = 'source-over';
+  return work;
+}
+
+function clipHalf(c2d, mid, top) { c2d.beginPath(); top ? c2d.rect(0, 0, TILE, mid) : c2d.rect(0, mid, TILE, TILE - mid); c2d.clip(); }
+
+function drawFlip(c2d, anim, side, settings, p) {
+  const A = cardFace(anim.from, side, settings), B = cardFace(anim.to, side, settings);
+  const b = cellBox(side), mid = b.y + b.h / 2;
+  c2d.save(); clipHalf(c2d, mid, true); c2d.drawImage(B, 0, 0); c2d.restore();     // new top behind
+  c2d.save(); clipHalf(c2d, mid, false); c2d.drawImage(A, 0, 0); c2d.restore();    // old bottom behind
+  if (p < 0.5) {                                   // old top folds down
+    const s = Math.max(0.001, Math.cos(p * Math.PI));
+    c2d.save(); clipHalf(c2d, mid, true);
+    c2d.translate(0, mid); c2d.scale(1, s); c2d.translate(0, -mid);
+    c2d.drawImage(shaded(A, 0.55 * (1 - s)), 0, 0); c2d.restore();
+  } else {                                         // new bottom unfolds
+    const s = Math.max(0.001, -Math.cos(p * Math.PI));
+    c2d.save(); clipHalf(c2d, mid, false);
+    c2d.translate(0, mid); c2d.scale(1, s); c2d.translate(0, -mid);
+    c2d.drawImage(shaded(B, 0.45 * (1 - s)), 0, 0); c2d.restore();
+  }
+}
+
+// ---------------------------------------------------------------- tiles
+function renderTile(inst, now) {
+  const s = shared;
+  tctx.clearRect(0, 0, TILE, TILE);
+  const sx = inst.side ? SIDE_CX - TILE / 2 : inst.col * (TILE + GAP);
+  tctx.drawImage(canvas, sx, inst.row * (TILE + GAP), TILE, TILE, 0, 0, TILE, TILE);
+  const flipStyle = s.style === 'flip';
+  if ((s.layout || 'digits') === 'digits') {
+    if (flipStyle) {
+      if (inst.anim) drawFlip(tctx, inst.anim, inst.side, s, Math.min(1, (now - inst.anim.start) / FLIP_MS));
+      else if (inst.cur && inst.cur.t && inst.cur.t.trim()) tctx.drawImage(cardFace(inst.cur, inst.side, s), 0, 0);
+    } else if (inst.cur && inst.cur.t && inst.cur.t.trim()) {
+      const back = Number(s.backing ?? 35) / 100;
+      if (back > 0) { tctx.fillStyle = `rgba(0,0,0,${back})`; tctx.fillRect(0, 0, TILE, TILE); }
+      drawText(tctx, inst.cur, s, cellBox(inst.side), false);
+    }
+  }
+  if (inst.side && s.logo && inst.row === logoSlot(s)) {
+    const img = getLogo(s.logo);
+    if (img) {
+      const b = cellBox(true), pad = 4;
+      const k = Math.min((b.w - pad * 2) / img.naturalWidth, (b.h - pad * 2) / img.naturalHeight) * (Number(s.logoScale || 100) / 100);
+      const w = img.naturalWidth * k, h = img.naturalHeight * k;
+      tctx.save(); tctx.shadowColor = 'rgba(0,0,0,0.6)'; tctx.shadowBlur = 10;
+      tctx.drawImage(img, (TILE - w) / 2, (TILE - h) / 2, w, h); tctx.restore();
+    }
+  }
+  return tileCanvas.toDataURL('image/png');
+}
+
+// ---------------------------------------------------------------- spread layout (text over the whole picture)
+function drawSpreadText(settings) {
+  const now = new Date();
+  let h = now.getHours(), suffix = '';
+  if (settings.hour12) { suffix = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; }
+  let time = (settings.hour12 ? String(h) : pad(h)) + ':' + pad(now.getMinutes());
+  if (settings.showSeconds) time += ':' + pad(now.getSeconds());
+  const date = now.toLocaleDateString(settings.locale || 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const SF = (FONTS[settings.font] && !FONTS[settings.font].digitsOnly) ? FONTS[settings.font] : FONTS.segoe;
+  const font = (sz) => `${SF.w || 700} ${sz}px ${SF.fam}`;
+  ctx.save();
+  ctx.fillStyle = settings.textColor || '#FFFFFF'; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 16;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const rowCentre = (r) => r * (TILE + GAP) + TILE / 2, timeY = (rowCentre(0) + rowCentre(1)) / 2, GX = GRID_W / 2;
+  let size = settings.showSeconds ? 200 : 260; ctx.font = font(size);
+  while ((ctx.measureText(time).width > GRID_W * 0.92 || size > (TILE * 2 + GAP) * 0.95) && size > 60) { size -= 6; ctx.font = font(size); }
+  ctx.fillText(time, GX, timeY);
+  if (suffix) { const tw = ctx.measureText(time).width; ctx.font = font(Math.round(size * 0.2)); ctx.textAlign = 'right'; ctx.fillText(suffix, Math.min(GRID_W - 10, GX + tw / 2 + 4), timeY + size * 0.42); }
+  ctx.textAlign = 'center';
+  let ds = 64; ctx.font = font(ds);
+  while (ctx.measureText(date).width > GRID_W * 0.94 && ds > 20) { ds -= 2; ctx.font = font(ds); }
+  ctx.fillText(date, GX, rowCentre(ROWS - 1));
+  ctx.restore();
+  return time + '|' + date;
+}
+
+// ---------------------------------------------------------------- main loop
+function sameCell(a, b) { return (a ? a.t + '|' + a.k + '|' + (a.match || '') : '') === (b ? b.t + '|' + b.k + '|' + (b.match || '') : ''); }
+let ticker = null, frameCount = 0;
+
+function frame(force) {
+  const ids = Object.keys(instances); if (!ids.length) return;
+  const now = Date.now();
+  const s = shared;
+  const animatedBg = !!BG[s.bg] || s.bg === 'video';
+  const fps = Math.max(1, Math.min(12, Number(s.animFps || 4)));
+  let bgChanged = false;
+  if ((animatedBg && now - lastBgAt >= 1000 / fps) || bgDirty || force) {
+    drawBackground(now); lastBgAt = now; bgDirty = false; bgChanged = true; lastSpreadKey = '';
+  }
+  const digits = (s.layout || 'digits') === 'digits';
+  if (!digits) {
+    const k = new Date().toTimeString().slice(0, 8) + JSON.stringify(s).length;
+    if (k !== lastSpreadKey || bgChanged) {
+      if (!bgChanged) drawBackground(now);
+      drawSpreadText(s); lastSpreadKey = k; bgChanged = true;
+    }
+  }
+  const cells = digits ? buildCells(s) : {};
+  const flipStyle = s.style === 'flip';
+  for (const id of ids) {
+    const inst = instances[id];
+    if (inst.col == null) continue;
+    const target = cells[(inst.side ? 5 : inst.col) + ',' + inst.row] || null;
+    if (!sameCell(target, inst.cur)) {
+      if (flipStyle && inst.shown && inst.cur && target && !target.noFlip && (inst.cur.t || '').trim() && (target.t || '').trim())
+        inst.anim = { from: inst.cur, to: target, start: now };
+      else inst.anim = null;
+      inst.cur = target; inst.dirty = true;
+    }
+    let animating = false;
+    if (inst.anim) { if (now - inst.anim.start >= FLIP_MS) { inst.anim = null; inst.dirty = true; } else animating = true; }
+    if (animating || inst.dirty || bgChanged || force) {
+      const img = renderTile(inst, now);
+      if (img !== inst.last || force) { send({ event: 'setImage', context: id, payload: { image: img, target: 0 } }); inst.last = img; }
+      inst.dirty = false; inst.shown = true;
+    }
+  }
+}
+function forceAll() { faceCache.clear(); bgDirty = true; for (const id in instances) { instances[id].dirty = true; instances[id].last = null; } }
+function ensureTicker() {
+  const n = Object.keys(instances).length;
+  if (n && !ticker) ticker = setInterval(() => { try { frame(false); } catch (e) { log('ERR frame ' + e.message); } }, TICK_MS);
+  if (!n && ticker) { clearInterval(ticker); ticker = null; }
+}
+
+// ---------------------------------------------------------------- SDK plumbing
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+function log(msg) { send({ event: 'logMessage', payload: { message: '[wallclock] ' + msg } }); }
+
+// First key to appear provides the shared settings; any later key (e.g. one just dropped in)
+// is brought in line with them instead of overwriting them with defaults.
+function adoptOrSync(context, settings) {
+  const st = settings || {};
+  if (!Object.keys(shared).length) { if (Object.keys(st).length) shared = st; return; }
+  if (JSON.stringify(st) !== JSON.stringify(shared)) send({ event: 'setSettings', context, payload: shared });
+}
+
+function handle(m) {
+  const p = m.payload || {};
+  switch (m.event) {
+    case 'willAppear': {
+      const co = p.coordinates || {};
+      let col = Number(co.column), row = Number(co.row);
+      const isSide = p.controller === 'Information' || col >= 5;
+      let inst;
+      if (isSide) {
+        let slot = (co.column >= 5 && co.row >= 0 && co.row <= 2) ? Number(co.row) : Object.values(instances).filter(x => x.side).length % 3;
+        inst = { device: m.device, col: COLS, row: slot, side: true };
+      } else {
+        // 293S V3: StreamDock's (column,row) is a scrambled index. Counted row-major (i = row*5 + col),
+        // keys run top-to-bottom down each physical column, starting from the RIGHT-hand column.
+        const i = row * 5 + col;
+        inst = { device: m.device, col: 4 - Math.floor(i / 3), row: i % 3, side: false };
+      }
+      inst.cur = null; inst.anim = null; inst.dirty = true; inst.last = null; inst.shown = false;
+      instances[m.context] = inst;
+      adoptOrSync(m.context, p.settings);
+      if (shared.wallpaper) getImage(shared.wallpaper);
+      bgDirty = true;
+      ensureTicker();
+      break;
+    }
+    case 'willDisappear':
+      delete instances[m.context];
+      ensureTicker();
+      break;
+    case 'didReceiveSettings': {
+      const incoming = Object.assign({}, p.settings || {});
+      if (incoming.wallpaper === undefined && shared.wallpaper !== undefined) incoming.wallpaper = shared.wallpaper;
+      const changed = JSON.stringify(incoming) !== JSON.stringify(shared);
+      shared = incoming;
+      if (changed && JSON.stringify(incoming) !== JSON.stringify(p.settings || {})) send({ event: 'setSettings', context: m.context, payload: shared });
+      if (shared.wallpaper) getImage(shared.wallpaper);
+      if (changed) for (const c in instances) if (c !== m.context) send({ event: 'setSettings', context: c, payload: shared });
+      forceAll();
+      break;
+    }
+    case 'deviceDidConnect':
+    case 'systemDidWakeUp':
+      setTimeout(forceAll, 500);
+      break;
+  }
+}
+
+function connect(port, uuid, registerEvent) {
+  ws = new WebSocket('ws://127.0.0.1:' + port);
+  ws.onopen = () => send({ event: registerEvent, uuid });
+  ws.onmessage = (evt) => {
+    let m; try { m = JSON.parse(evt.data); } catch (e) { return; }
+    try { handle(m); } catch (e) { log('ERR ' + e.message); }
+  };
+  ws.onclose = () => { ws = null; };
+}
+window.connectElgatoStreamDeckSocket = connect;
+window.connectSDSocket = connect;
+window.connectSocket = connect;
+</script>
+</body>
+</html>

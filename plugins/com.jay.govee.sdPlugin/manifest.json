@@ -1,0 +1,47 @@
+{
+  "Actions": [
+    {
+      "UUID": "com.jay.govee.toggle",
+      "Icon": "images/icon",
+      "state": 0,
+      "States": [
+        {
+          "FontSize": "10",
+          "TitleAlignment": "bottom",
+          "Image": "images/key.png"
+        }
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Controllers": [
+        "Keypad"
+      ],
+      "Name": "Lamp On/Off",
+      "Tooltip": "Press to turn the Govee Aura lamp on or off. The key shows whether it's on and its colour."
+    }
+  ],
+  "Version": "1.0.3",
+  "Nodejs": {
+    "Version": "20"
+  },
+  "Name": "Govee Lamp",
+  "Icon": "images/category",
+  "CategoryIcon": "images/category",
+  "Category": "Govee Lamp",
+  "Description": "Toggle the Govee Aura (H6052) lamp over Bluetooth, with live on/off and colour on the key",
+  "CodePath": "plugin/index.js",
+  "CodePathWin": "plugin/index.js",
+  "SDKVersion": 1,
+  "Author": "Jay",
+  "URL": "",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "UUID": "com.jay.govee",
+  "Software": {
+    "MinimumVersion": "2.9"
+  }
+}

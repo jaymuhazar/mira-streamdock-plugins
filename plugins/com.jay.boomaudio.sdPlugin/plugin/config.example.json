@@ -1,0 +1,10 @@
+{
+  "python": "pythonw",
+  "hotkey": ["ctrl", "shift", "d"],
+  "poll_seconds": 2,
+  "devices": [
+    { "match": "Delta",   "icon": "headset", "label": "DELTA II" },
+    { "match": "Edifier", "icon": "monitor", "label": "MR5" },
+    { "match": "Kithara", "icon": "headset", "label": "KITHARA" }
+  ]
+}
